@@ -1,0 +1,59 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+/**
+ * @title HeartToken ($HEART)
+ * @notice Token de gobernanza de BitMatch en BOB L2
+ * @dev Se mintea cuando:
+ *      - Dos usuarios hacen match mutuo (+10 HEART cada uno)
+ *      - Un usuario recibe un heart/like (+1 HEART)
+ *      - Un match dura más de 7 días activo (+5 HEART bonus)
+ */
+contract HeartToken is ERC20, Ownable {
+    // Solo el contrato BitMatch puede mintear
+    address public bitMatchContract;
+
+    // Límite máximo de supply (100 millones)
+    uint256 public constant MAX_SUPPLY = 100_000_000 * 10**18;
+
+    // Recompensas
+    uint256 public constant REWARD_HEART_SENT = 1 * 10**18;    // 1 $HEART por dar like
+    uint256 public constant REWARD_MATCH = 10 * 10**18;         // 10 $HEART por match mutuo
+    uint256 public constant REWARD_MATCH_BONUS = 5 * 10**18;    // 5 $HEART bonus por match duradero
+
+    event HeartMinted(address indexed to, uint256 amount, string reason);
+
+    modifier onlyBitMatch() {
+        require(msg.sender == bitMatchContract, "Solo BitMatch puede mintear");
+        _;
+    }
+
+    constructor() ERC20("Heart Token", "HEART") Ownable(msg.sender) {}
+
+    /**
+     * @notice Configura el contrato BitMatch autorizado a mintear
+     */
+    function setBitMatchContract(address _bitMatch) external onlyOwner {
+        require(_bitMatch != address(0), "Direccion invalida");
+        bitMatchContract = _bitMatch;
+    }
+
+    /**
+     * @notice Mintea tokens de recompensa — solo llamable por BitMatch
+     */
+    function mintReward(address to, uint256 amount, string calldata reason) external onlyBitMatch {
+        require(totalSupply() + amount <= MAX_SUPPLY, "Supply maximo alcanzado");
+        _mint(to, amount);
+        emit HeartMinted(to, amount, reason);
+    }
+
+    /**
+     * @notice Consulta el balance formateado (sin decimales)
+     */
+    function balanceDisplay(address user) external view returns (uint256) {
+        return balanceOf(user) / 10**18;
+    }
+}
