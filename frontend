@@ -1,0 +1,872 @@
+import { useState, useEffect, useRef } from "react";
+
+// ─── MOCK DATA ───────────────────────────────────────────────────────────────
+const MOCK_PROFILES = [
+  {
+    id: "1",
+    name: "Satoshi_girl.btc",
+    age: 28,
+    location: "El Salvador",
+    bio: "HODLer desde el bloque génesis. Busco alguien que entienda por qué corrí un nodo completo en mi cumpleaños 🧡",
+    inscription: "6fb976ab49dcec017f1e201e84395983204ae1a7c2abf7ced0a85d692e442799i0",
+    tags: ["Bitcoin Maxi", "Node Runner", "No KYC"],
+    hearts: 142,
+    matches: 23,
+    boosted: true,
+    gradient: "from-orange-500 to-amber-600",
+    ordinalColor: "#F97316",
+  },
+  {
+    id: "2",
+    name: "LightningLuke",
+    age: 31,
+    location: "Prague",
+    bio: "Abro canales de Lightning como otros abren conversaciones. Si pagas en sats, ya eres mi tipo ⚡",
+    inscription: "9c3dc2b61b63302f63cf2a8f34e80b96bc7bc0d2b07d89ab0f8e0e42e2d1fb7ci0",
+    tags: ["Lightning", "Privacy", "Cypherpunk"],
+    hearts: 89,
+    matches: 14,
+    boosted: false,
+    gradient: "from-yellow-400 to-orange-500",
+    ordinalColor: "#EAB308",
+  },
+  {
+    id: "3",
+    name: "OrdinalsQueen",
+    age: 26,
+    location: "Miami",
+    bio: "Colecciono inscripciones como otros coleccionan excusas. Mi perfil IS un Ordinal. Literal. 👑",
+    inscription: "7e1c5a63dc821a97f4d8e3c2b09f156d8a2e7f4c1b3d5e9a7c2f8b4d6e1a3f5i0",
+    tags: ["Ordinals", "NFT", "Web3 Art"],
+    hearts: 203,
+    matches: 41,
+    boosted: true,
+    gradient: "from-red-500 to-orange-600",
+    ordinalColor: "#EF4444",
+  },
+  {
+    id: "4",
+    name: "BlockchainBruno",
+    age: 34,
+    location: "Buenos Aires",
+    bio: "Minero desde 2011. Sobreviví a 3 bear markets. Busco alguien con diamante en las manos 💎",
+    inscription: "3a9f2e8b5c7d1e4f6a0b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3fi0",
+    tags: ["Mining", "HODL", "Argentina"],
+    hearts: 67,
+    matches: 9,
+    boosted: false,
+    gradient: "from-amber-600 to-yellow-500",
+    ordinalColor: "#D97706",
+  },
+  {
+    id: "5",
+    name: "CypherPunkCelia",
+    age: 29,
+    location: "Berlin",
+    bio: "Privacy is not a crime. Uso Tor, CoinJoin, y filtros de citas muy estrictos 🔒",
+    inscription: "b4e7f2a9c1d5e8b3f6a0c2d4e6f8a2b4c6d8e0f2a4b6c8d0e2f4a6b8c0d2e4f6i0",
+    tags: ["Privacy", "Tor", "Monero curious"],
+    hearts: 118,
+    matches: 19,
+    boosted: false,
+    gradient: "from-orange-600 to-red-700",
+    ordinalColor: "#EA580C",
+  },
+];
+
+// ─── PARTICLE SYSTEM ─────────────────────────────────────────────────────────
+function HeartParticles({ active, onComplete }) {
+  const particles = Array.from({ length: 20 }, (_, i) => ({
+    id: i,
+    x: 40 + Math.random() * 20,
+    vx: (Math.random() - 0.5) * 8,
+    vy: -(3 + Math.random() * 5),
+    size: 8 + Math.random() * 16,
+    delay: Math.random() * 0.3,
+    emoji: ["❤️","💛","🧡","💖","⚡","₿"][Math.floor(Math.random()*6)],
+  }));
+
+  useEffect(() => {
+    if (active) {
+      const t = setTimeout(onComplete, 1500);
+      return () => clearTimeout(t);
+    }
+  }, [active]);
+
+  if (!active) return null;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 9999 }}>
+      {particles.map(p => (
+        <div
+          key={p.id}
+          style={{
+            position: "absolute",
+            left: `${p.x}%`,
+            bottom: "50%",
+            fontSize: p.size,
+            animation: `particleFloat 1.2s ease-out ${p.delay}s forwards`,
+            "--vx": `${p.vx * 20}px`,
+            "--vy": `${p.vy * 30}px`,
+          }}
+        >
+          {p.emoji}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── SWIPE CARD ───────────────────────────────────────────────────────────────
+function SwipeCard({ profile, onSwipe, isTop }) {
+  const cardRef = useRef(null);
+  const startX = useRef(0);
+  const currentX = useRef(0);
+  const isDragging = useRef(false);
+  const [dragOffset, setDragOffset] = useState(0);
+  const [dragDir, setDragDir] = useState(null);
+
+  const handleMouseDown = (e) => {
+    if (!isTop) return;
+    isDragging.current = true;
+    startX.current = e.clientX || e.touches?.[0]?.clientX;
+  };
+
+  const handleMouseMove = (e) => {
+    if (!isDragging.current) return;
+    const x = e.clientX || e.touches?.[0]?.clientX;
+    const diff = x - startX.current;
+    currentX.current = diff;
+    setDragOffset(diff);
+    setDragDir(diff > 30 ? "right" : diff < -30 ? "left" : null);
+  };
+
+  const handleMouseUp = () => {
+    if (!isDragging.current) return;
+    isDragging.current = false;
+    const threshold = 100;
+    if (currentX.current > threshold) {
+      onSwipe("right", profile);
+    } else if (currentX.current < -threshold) {
+      onSwipe("left", profile);
+    }
+    setDragOffset(0);
+    setDragDir(null);
+    currentX.current = 0;
+  };
+
+  const rotation = dragOffset * 0.08;
+  const opacity = 1 - Math.abs(dragOffset) / 500;
+
+  return (
+    <div
+      ref={cardRef}
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
+      onTouchStart={handleMouseDown}
+      onTouchMove={handleMouseMove}
+      onTouchEnd={handleMouseUp}
+      style={{
+        position: "absolute",
+        width: "100%",
+        maxWidth: 380,
+        cursor: isTop ? "grab" : "default",
+        transform: `translateX(${dragOffset}px) rotate(${rotation}deg) scale(${isTop ? 1 : 0.95})`,
+        transition: isDragging.current ? "none" : "transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)",
+        zIndex: isTop ? 10 : 5,
+        userSelect: "none",
+        touchAction: "none",
+      }}
+    >
+      {/* Overlay indicators */}
+      {dragDir === "right" && (
+        <div style={{
+          position: "absolute", top: 24, left: 24, zIndex: 20,
+          background: "rgba(249, 115, 22, 0.95)", borderRadius: 12, padding: "8px 20px",
+          border: "3px solid #F97316", transform: "rotate(-15deg)",
+          fontFamily: "'Playfair Display', serif", fontSize: 28, fontWeight: 900,
+          color: "white", letterSpacing: 2,
+        }}>❤️ HEART</div>
+      )}
+      {dragDir === "left" && (
+        <div style={{
+          position: "absolute", top: 24, right: 24, zIndex: 20,
+          background: "rgba(30,30,30,0.95)", borderRadius: 12, padding: "8px 20px",
+          border: "3px solid #555", transform: "rotate(15deg)",
+          fontFamily: "'Playfair Display', serif", fontSize: 28, fontWeight: 900,
+          color: "#888", letterSpacing: 2,
+        }}>✕ PASS</div>
+      )}
+
+      {/* Card body */}
+      <div style={{
+        borderRadius: 28,
+        overflow: "hidden",
+        background: "#111",
+        border: "1px solid rgba(249,115,22,0.2)",
+        boxShadow: isTop
+          ? "0 32px 80px rgba(0,0,0,0.8), 0 0 0 1px rgba(249,115,22,0.1)"
+          : "0 8px 32px rgba(0,0,0,0.5)",
+      }}>
+        {/* Ordinal image area */}
+        <div style={{
+          height: 340,
+          background: `linear-gradient(135deg, ${profile.ordinalColor}22, #0a0a0a 60%)`,
+          position: "relative",
+          overflow: "hidden",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}>
+          {/* Geometric Ordinal placeholder */}
+          <div style={{
+            width: 180, height: 180,
+            borderRadius: "50%",
+            background: `radial-gradient(circle at 30% 30%, ${profile.ordinalColor}, ${profile.ordinalColor}44)`,
+            boxShadow: `0 0 60px ${profile.ordinalColor}66`,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 72,
+          }}>
+            {["🟠","⚡","👑","💎","🔒"][parseInt(profile.id)-1]}
+          </div>
+
+          {/* Boosted badge */}
+          {profile.boosted && (
+            <div style={{
+              position: "absolute", top: 16, right: 16,
+              background: "linear-gradient(135deg, #F97316, #EAB308)",
+              borderRadius: 20, padding: "4px 14px",
+              fontSize: 11, fontWeight: 700, color: "#000",
+              letterSpacing: 1.5, textTransform: "uppercase",
+              fontFamily: "'Space Mono', monospace",
+            }}>⚡ BOOSTED</div>
+          )}
+
+          {/* Inscription ID */}
+          <div style={{
+            position: "absolute", bottom: 12, left: 12, right: 12,
+            fontFamily: "'Space Mono', monospace",
+            fontSize: 9, color: "rgba(255,255,255,0.3)",
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          }}>
+            ₿ {profile.inscription}
+          </div>
+
+          {/* Gradient overlay */}
+          <div style={{
+            position: "absolute", bottom: 0, left: 0, right: 0, height: "50%",
+            background: "linear-gradient(to top, #111, transparent)",
+          }} />
+        </div>
+
+        {/* Card info */}
+        <div style={{ padding: "20px 24px 24px" }}>
+          <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 8 }}>
+            <div>
+              <div style={{
+                fontFamily: "'Playfair Display', serif",
+                fontSize: 26, fontWeight: 700, color: "#fff",
+                lineHeight: 1.1,
+              }}>
+                {profile.name}
+              </div>
+              <div style={{
+                fontFamily: "'Space Mono', monospace",
+                fontSize: 12, color: profile.ordinalColor, marginTop: 4,
+              }}>
+                📍 {profile.location} · {profile.age}
+              </div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#555" }}>❤️ {profile.hearts}</div>
+              <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#555" }}>💘 {profile.matches}</div>
+            </div>
+          </div>
+
+          <p style={{
+            fontFamily: "'Lora', serif",
+            fontSize: 14, color: "#999", lineHeight: 1.6,
+            margin: "12px 0", minHeight: 44,
+          }}>
+            {profile.bio}
+          </p>
+
+          {/* Tags */}
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12 }}>
+            {profile.tags.map(tag => (
+              <span key={tag} style={{
+                fontFamily: "'Space Mono', monospace",
+                fontSize: 10, color: profile.ordinalColor,
+                border: `1px solid ${profile.ordinalColor}44`,
+                borderRadius: 20, padding: "3px 10px",
+                background: `${profile.ordinalColor}11`,
+                letterSpacing: 0.5,
+              }}>#{tag}</span>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── MATCH MODAL ──────────────────────────────────────────────────────────────
+function MatchModal({ profile, onClose, myHearts }) {
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 1000,
+      background: "rgba(0,0,0,0.95)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      animation: "fadeIn 0.3s ease",
+    }}>
+      {/* Radial glow */}
+      <div style={{
+        position: "absolute", inset: 0,
+        background: "radial-gradient(circle at 50% 50%, rgba(249,115,22,0.15) 0%, transparent 70%)",
+      }} />
+
+      <div style={{
+        textAlign: "center", padding: "48px 40px",
+        maxWidth: 380, width: "90%", position: "relative",
+      }}>
+        {/* Match text */}
+        <div style={{
+          fontFamily: "'Playfair Display', serif",
+          fontSize: 16, letterSpacing: 6, color: "#F97316",
+          textTransform: "uppercase", marginBottom: 16,
+          animation: "slideDown 0.5s ease 0.2s both",
+        }}>
+          It's a
+        </div>
+        <div style={{
+          fontFamily: "'Playfair Display', serif",
+          fontSize: 72, fontWeight: 900, color: "#fff",
+          lineHeight: 1, marginBottom: 8,
+          animation: "slideDown 0.6s cubic-bezier(0.175,0.885,0.32,1.275) 0.3s both",
+        }}>
+          MATCH
+        </div>
+        <div style={{
+          fontSize: 48,
+          animation: "bounceIn 0.5s ease 0.5s both",
+        }}>💘</div>
+
+        {/* Profile name */}
+        <div style={{
+          fontFamily: "'Playfair Display', serif",
+          fontSize: 24, color: "#fff", marginTop: 24, marginBottom: 8,
+          animation: "slideUp 0.5s ease 0.6s both",
+        }}>
+          {profile.name}
+        </div>
+
+        {/* Reward */}
+        <div style={{
+          background: "linear-gradient(135deg, rgba(249,115,22,0.2), rgba(234,179,8,0.2))",
+          border: "1px solid rgba(249,115,22,0.4)",
+          borderRadius: 16, padding: "16px 24px", marginTop: 24,
+          animation: "slideUp 0.5s ease 0.7s both",
+        }}>
+          <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#888", letterSpacing: 1 }}>
+            MINASTE
+          </div>
+          <div style={{
+            fontFamily: "'Playfair Display', serif",
+            fontSize: 36, fontWeight: 900,
+            background: "linear-gradient(135deg, #F97316, #EAB308)",
+            WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+            margin: "4px 0",
+          }}>
+            +10 $HEART
+          </div>
+          <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#666" }}>
+            Total: {myHearts} $HEART
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div style={{ display: "flex", gap: 12, marginTop: 32, animation: "slideUp 0.5s ease 0.8s both" }}>
+          <button
+            onClick={onClose}
+            style={{
+              flex: 1, padding: "14px 0",
+              background: "transparent",
+              border: "1px solid #333", borderRadius: 14,
+              fontFamily: "'Space Mono', monospace",
+              fontSize: 12, color: "#666", cursor: "pointer",
+              letterSpacing: 1,
+            }}
+          >
+            Seguir swipeando
+          </button>
+          <button
+            style={{
+              flex: 1, padding: "14px 0",
+              background: "linear-gradient(135deg, #F97316, #EAB308)",
+              border: "none", borderRadius: 14,
+              fontFamily: "'Space Mono', monospace",
+              fontSize: 12, color: "#000", cursor: "pointer",
+              fontWeight: 700, letterSpacing: 1,
+            }}
+          >
+            ⚡ Enviar mensaje
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── HEADER ───────────────────────────────────────────────────────────────────
+function Header({ heartBalance, matchCount, walletConnected, onConnect }) {
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+      padding: "20px 24px 0",
+      maxWidth: 440, margin: "0 auto", width: "100%",
+    }}>
+      <div>
+        <div style={{
+          fontFamily: "'Playfair Display', serif",
+          fontSize: 28, fontWeight: 900, color: "#fff",
+          letterSpacing: -1,
+        }}>
+          Bit<span style={{ color: "#F97316" }}>Match</span>
+        </div>
+        <div style={{
+          fontFamily: "'Space Mono', monospace",
+          fontSize: 9, color: "#555", letterSpacing: 2, marginTop: -2,
+        }}>
+          ON BITCOIN · BOB L2
+        </div>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+        {/* Stats */}
+        <div style={{ textAlign: "right" }}>
+          <div style={{
+            fontFamily: "'Space Mono', monospace",
+            fontSize: 14, color: "#F97316", fontWeight: 700,
+          }}>
+            {heartBalance} ❤️
+          </div>
+          <div style={{
+            fontFamily: "'Space Mono', monospace",
+            fontSize: 10, color: "#555",
+          }}>
+            {matchCount} matches
+          </div>
+        </div>
+
+        {/* Wallet button */}
+        <button
+          onClick={onConnect}
+          style={{
+            padding: "8px 14px",
+            background: walletConnected ? "rgba(249,115,22,0.15)" : "#F97316",
+            border: `1px solid ${walletConnected ? "#F97316" : "transparent"}`,
+            borderRadius: 20,
+            fontFamily: "'Space Mono', monospace",
+            fontSize: 10, fontWeight: 700,
+            color: walletConnected ? "#F97316" : "#000",
+            cursor: "pointer", letterSpacing: 0.5,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {walletConnected ? "⚡ 0xAb...3f" : "Conectar"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── BOTTOM ACTIONS ───────────────────────────────────────────────────────────
+function BottomActions({ onPass, onHeart, onSuperHeart, canSuperHeart }) {
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", justifyContent: "center",
+      gap: 16, padding: "24px 0 32px",
+    }}>
+      {/* Pass */}
+      <button
+        onClick={onPass}
+        style={{
+          width: 60, height: 60, borderRadius: "50%",
+          background: "#111", border: "1px solid #333",
+          fontSize: 24, cursor: "pointer",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          transition: "all 0.2s",
+          boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
+        }}
+        onMouseEnter={e => e.target.style.background = "#1a1a1a"}
+        onMouseLeave={e => e.target.style.background = "#111"}
+      >
+        ✕
+      </button>
+
+      {/* Super heart (costs $HEART) */}
+      <button
+        onClick={onSuperHeart}
+        disabled={!canSuperHeart}
+        style={{
+          width: 52, height: 52, borderRadius: "50%",
+          background: canSuperHeart ? "linear-gradient(135deg, #EAB308, #F97316)" : "#222",
+          border: "none", fontSize: 20, cursor: canSuperHeart ? "pointer" : "not-allowed",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          opacity: canSuperHeart ? 1 : 0.4,
+          boxShadow: canSuperHeart ? "0 4px 20px rgba(234,179,8,0.4)" : "none",
+          transition: "all 0.2s",
+        }}
+        title="Super Heart (cuesta 1 $HEART)"
+      >
+        ⚡
+      </button>
+
+      {/* Heart / Like */}
+      <button
+        onClick={onHeart}
+        style={{
+          width: 72, height: 72, borderRadius: "50%",
+          background: "linear-gradient(135deg, #F97316, #EF4444)",
+          border: "none", fontSize: 32, cursor: "pointer",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          boxShadow: "0 8px 32px rgba(249,115,22,0.5)",
+          transition: "all 0.2s transform",
+        }}
+        onMouseEnter={e => e.currentTarget.style.transform = "scale(1.1)"}
+        onMouseLeave={e => e.currentTarget.style.transform = "scale(1)"}
+        onMouseDown={e => e.currentTarget.style.transform = "scale(0.95)"}
+        onMouseUp={e => e.currentTarget.style.transform = "scale(1.1)"}
+      >
+        ❤️
+      </button>
+
+      {/* Boost */}
+      <button
+        style={{
+          width: 52, height: 52, borderRadius: "50%",
+          background: "#111", border: "1px solid #333",
+          fontSize: 20, cursor: "pointer",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
+          transition: "all 0.2s",
+        }}
+        title="Boost tu perfil (5 $HEART)"
+      >
+        🚀
+      </button>
+
+      {/* Info */}
+      <button
+        style={{
+          width: 60, height: 60, borderRadius: "50%",
+          background: "#111", border: "1px solid #333",
+          fontSize: 22, cursor: "pointer",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          transition: "all 0.2s",
+        }}
+      >
+        ₿
+      </button>
+    </div>
+  );
+}
+
+// ─── EMPTY STATE ──────────────────────────────────────────────────────────────
+function EmptyState({ onReset }) {
+  return (
+    <div style={{
+      flex: 1, display: "flex", flexDirection: "column",
+      alignItems: "center", justifyContent: "center",
+      padding: 40, textAlign: "center",
+    }}>
+      <div style={{ fontSize: 64, marginBottom: 16 }}>₿</div>
+      <div style={{
+        fontFamily: "'Playfair Display', serif",
+        fontSize: 24, color: "#fff", marginBottom: 8,
+      }}>
+        Has visto todo el feed
+      </div>
+      <div style={{
+        fontFamily: "'Lora', serif",
+        fontSize: 14, color: "#666", lineHeight: 1.6, marginBottom: 32,
+      }}>
+        No más bitcoiners por aquí… por ahora.
+        El mercado está en accumulation.
+      </div>
+      <button
+        onClick={onReset}
+        style={{
+          padding: "14px 32px",
+          background: "linear-gradient(135deg, #F97316, #EAB308)",
+          border: "none", borderRadius: 20,
+          fontFamily: "'Space Mono', monospace",
+          fontSize: 12, fontWeight: 700,
+          color: "#000", cursor: "pointer", letterSpacing: 1,
+        }}
+      >
+        Recargar feed
+      </button>
+    </div>
+  );
+}
+
+// ─── MAIN APP ─────────────────────────────────────────────────────────────────
+export default function BitMatch() {
+  const [profiles, setProfiles] = useState([...MOCK_PROFILES]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [heartBalance, setHeartBalance] = useState(0);
+  const [matchCount, setMatchCount] = useState(0);
+  const [showMatch, setShowMatch] = useState(null);
+  const [showParticles, setShowParticles] = useState(false);
+  const [walletConnected, setWalletConnected] = useState(false);
+  const [notification, setNotification] = useState(null);
+
+  const currentProfile = profiles[currentIndex];
+  const nextProfile = profiles[currentIndex + 1];
+
+  const showNotif = (msg) => {
+    setNotification(msg);
+    setTimeout(() => setNotification(null), 2000);
+  };
+
+  const handleSwipe = (direction, profile) => {
+    if (direction === "right") {
+      handleHeart(profile);
+    } else {
+      handlePass();
+    }
+  };
+
+  const handleHeart = (profile = currentProfile) => {
+    if (!profile) return;
+
+    // Mint +1 $HEART
+    setHeartBalance(h => h + 1);
+
+    // ~40% chance of match for demo
+    const isMatch = Math.random() > 0.6;
+
+    if (isMatch) {
+      setHeartBalance(h => h + 10);
+      setMatchCount(m => m + 1);
+      setShowParticles(true);
+      setTimeout(() => setShowMatch(profile), 300);
+    } else {
+      showNotif(`❤️ +1 $HEART por el like`);
+    }
+
+    setCurrentIndex(i => i + 1);
+  };
+
+  const handlePass = () => {
+    setCurrentIndex(i => i + 1);
+  };
+
+  const handleSuperHeart = () => {
+    if (heartBalance < 1) return;
+    setHeartBalance(h => h - 1);
+    handleHeart();
+    showNotif("⚡ Super Heart enviado!");
+  };
+
+  return (
+    <>
+      {/* Global styles */}
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=Lora:ital,wght@0,400;0,600;1,400&family=Space+Mono:wght@400;700&display=swap');
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: #080808; }
+
+        @keyframes particleFloat {
+          0% { transform: translate(0, 0) scale(1); opacity: 1; }
+          100% { transform: translate(var(--vx), var(--vy, -200px)) scale(0); opacity: 0; }
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes slideDown {
+          from { opacity: 0; transform: translateY(-30px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes slideUp {
+          from { opacity: 0; transform: translateY(30px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes bounceIn {
+          0% { opacity: 0; transform: scale(0.3); }
+          50% { transform: scale(1.2); }
+          100% { opacity: 1; transform: scale(1); }
+        }
+        @keyframes notifSlide {
+          0% { opacity: 0; transform: translateX(-50%) translateY(20px); }
+          20% { opacity: 1; transform: translateX(-50%) translateY(0); }
+          80% { opacity: 1; transform: translateX(-50%) translateY(0); }
+          100% { opacity: 0; transform: translateX(-50%) translateY(-20px); }
+        }
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.5; }
+        }
+      `}</style>
+
+      {/* Notification */}
+      {notification && (
+        <div style={{
+          position: "fixed", bottom: 120, left: "50%",
+          transform: "translateX(-50%)",
+          background: "rgba(249,115,22,0.95)", borderRadius: 20,
+          padding: "10px 20px", zIndex: 500,
+          fontFamily: "'Space Mono', monospace",
+          fontSize: 12, color: "#000", fontWeight: 700,
+          animation: "notifSlide 2s ease forwards",
+          whiteSpace: "nowrap",
+        }}>
+          {notification}
+        </div>
+      )}
+
+      {/* Particles */}
+      <HeartParticles
+        active={showParticles}
+        onComplete={() => setShowParticles(false)}
+      />
+
+      {/* Match modal */}
+      {showMatch && (
+        <MatchModal
+          profile={showMatch}
+          myHearts={heartBalance}
+          onClose={() => setShowMatch(null)}
+        />
+      )}
+
+      {/* App */}
+      <div style={{
+        minHeight: "100dvh",
+        background: "#080808",
+        display: "flex", flexDirection: "column",
+        maxWidth: 440, margin: "0 auto",
+        position: "relative",
+      }}>
+        {/* Ambient glow */}
+        <div style={{
+          position: "fixed", top: "20%", left: "50%",
+          transform: "translateX(-50%)",
+          width: 300, height: 300,
+          borderRadius: "50%",
+          background: "radial-gradient(circle, rgba(249,115,22,0.08) 0%, transparent 70%)",
+          pointerEvents: "none",
+        }} />
+
+        <Header
+          heartBalance={heartBalance}
+          matchCount={matchCount}
+          walletConnected={walletConnected}
+          onConnect={() => setWalletConnected(v => !v)}
+        />
+
+        {/* Wallet warning */}
+        {!walletConnected && (
+          <div style={{
+            margin: "12px 24px 0",
+            padding: "10px 16px",
+            background: "rgba(249,115,22,0.08)",
+            border: "1px solid rgba(249,115,22,0.2)",
+            borderRadius: 12,
+            fontFamily: "'Space Mono', monospace",
+            fontSize: 10, color: "#F97316",
+            letterSpacing: 0.5,
+            animation: "pulse 2s ease infinite",
+          }}>
+            ⚡ Conecta tu wallet para guardar matches on-chain en BOB L2
+          </div>
+        )}
+
+        {/* Card stack */}
+        <div style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "24px 24px 0",
+          position: "relative",
+          minHeight: 500,
+        }}>
+          {currentProfile ? (
+            <div style={{
+              position: "relative",
+              width: "100%", maxWidth: 380,
+              height: 560,
+            }}>
+              {/* Back card */}
+              {nextProfile && (
+                <SwipeCard
+                  key={nextProfile.id + "-back"}
+                  profile={nextProfile}
+                  onSwipe={() => {}}
+                  isTop={false}
+                />
+              )}
+              {/* Top card */}
+              <SwipeCard
+                key={currentProfile.id}
+                profile={currentProfile}
+                onSwipe={handleSwipe}
+                isTop={true}
+              />
+            </div>
+          ) : (
+            <EmptyState onReset={() => {
+              setProfiles([...MOCK_PROFILES]);
+              setCurrentIndex(0);
+            }} />
+          )}
+        </div>
+
+        {/* Bottom actions */}
+        {currentProfile && (
+          <BottomActions
+            onPass={handlePass}
+            onHeart={() => handleHeart()}
+            onSuperHeart={handleSuperHeart}
+            canSuperHeart={heartBalance >= 1}
+          />
+        )}
+
+        {/* Bottom info bar */}
+        <div style={{
+          padding: "0 24px 20px",
+          display: "flex", justifyContent: "center", gap: 24,
+          borderTop: "1px solid #111",
+          paddingTop: 12,
+        }}>
+          {[
+            { label: "Feed", icon: "🔥" },
+            { label: "Matches", icon: "💘" },
+            { label: "Perfil", icon: "₿" },
+            { label: "Gobernanza", icon: "🗳️" },
+          ].map(item => (
+            <button
+              key={item.label}
+              style={{
+                display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+                background: "none", border: "none", cursor: "pointer",
+                fontFamily: "'Space Mono', monospace",
+                fontSize: 9, color: "#555", letterSpacing: 0.5,
+              }}
+            >
+              <span style={{ fontSize: 20 }}>{item.icon}</span>
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
