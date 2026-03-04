@@ -1,0 +1,295 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "./HeartToken.sol";
+
+/**
+ * @title BitMatch
+ * @notice Contrato principal de BitMatch — Tinder en Bitcoin (BOB L2)
+ * @dev Flujo:
+ *      1. Usuario registra perfil con su Ordinal inscription ID
+ *      2. Usuario da like/heart a otro usuario → recibe 1 $HEART
+ *      3. Si el otro también dio like → MATCH → ambos reciben 10 $HEART
+ *      4. El perfil puede comprar "boosts" con $HEART (gobernanza futura)
+ */
+contract BitMatch {
+
+    HeartToken public heartToken;
+    address public owner;
+
+    // ═══════════════════════════════════════════
+    //  STRUCTS
+    // ═══════════════════════════════════════════
+
+    struct Profile {
+        address wallet;
+        string inscriptionId;    // Ordinal inscription ID (Bitcoin L1)
+        string displayName;
+        string bio;
+        bool isActive;
+        uint256 registeredAt;
+        uint256 matchCount;
+        uint256 heartsSent;
+        uint256 heartsReceived;
+        uint256 boostExpiry;     // timestamp hasta cuando tiene boost activo
+    }
+
+    struct Match {
+        address user1;
+        address user2;
+        uint256 matchedAt;
+        bool isActive;
+    }
+
+    // ═══════════════════════════════════════════
+    //  STORAGE
+    // ═══════════════════════════════════════════
+
+    mapping(address => Profile) public profiles;
+    mapping(address => bool) public hasProfile;
+
+    // likes[fromUser][toUser] = true si fromUser dio like a toUser
+    mapping(address => mapping(address => bool)) public likes;
+
+    // matches[matchId] => Match
+    mapping(bytes32 => Match) public matches;
+
+    // Lista de matches por usuario
+    mapping(address => bytes32[]) public userMatches;
+
+    // Costo de boost en $HEART
+    uint256 public boostCost = 5 * 10**18;      // 5 $HEART = 24h boost
+    uint256 public boostDuration = 24 hours;
+
+    // Addresses de todos los perfiles (para el feed)
+    address[] public allProfiles;
+
+    // ═══════════════════════════════════════════
+    //  EVENTOS
+    // ═══════════════════════════════════════════
+
+    event ProfileCreated(address indexed user, string inscriptionId, string displayName);
+    event HeartSent(address indexed from, address indexed to);
+    event MatchCreated(address indexed user1, address indexed user2, bytes32 matchId);
+    event BoostActivated(address indexed user, uint256 expiry);
+    event ProfileUpdated(address indexed user);
+
+    // ═══════════════════════════════════════════
+    //  MODIFIERS
+    // ═══════════════════════════════════════════
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Solo el owner");
+        _;
+    }
+
+    modifier profileExists(address user) {
+        require(hasProfile[user], "Perfil no existe");
+        require(profiles[user].isActive, "Perfil inactivo");
+        _;
+    }
+
+    constructor(address _heartToken) {
+        heartToken = HeartToken(_heartToken);
+        owner = msg.sender;
+    }
+
+    // ═══════════════════════════════════════════
+    //  REGISTRO DE PERFIL
+    // ═══════════════════════════════════════════
+
+    /**
+     * @notice Registra un perfil usando un Ordinal inscription como foto
+     * @param inscriptionId ID de la inscripción Ordinal en Bitcoin L1
+     * @param displayName Nombre visible
+     * @param bio Descripción del perfil
+     */
+    function createProfile(
+        string calldata inscriptionId,
+        string calldata displayName,
+        string calldata bio
+    ) external {
+        require(!hasProfile[msg.sender], "Ya tienes perfil");
+        require(bytes(inscriptionId).length > 0, "Inscription ID requerido");
+        require(bytes(displayName).length > 0, "Nombre requerido");
+
+        profiles[msg.sender] = Profile({
+            wallet: msg.sender,
+            inscriptionId: inscriptionId,
+            displayName: displayName,
+            bio: bio,
+            isActive: true,
+            registeredAt: block.timestamp,
+            matchCount: 0,
+            heartsSent: 0,
+            heartsReceived: 0,
+            boostExpiry: 0
+        });
+
+        hasProfile[msg.sender] = true;
+        allProfiles.push(msg.sender);
+
+        emit ProfileCreated(msg.sender, inscriptionId, displayName);
+    }
+
+    /**
+     * @notice Actualiza bio y nombre del perfil
+     */
+    function updateProfile(string calldata displayName, string calldata bio)
+        external
+        profileExists(msg.sender)
+    {
+        profiles[msg.sender].displayName = displayName;
+        profiles[msg.sender].bio = bio;
+        emit ProfileUpdated(msg.sender);
+    }
+
+    // ═══════════════════════════════════════════
+    //  MECÁNICA DE SWIPE / HEART
+    // ═══════════════════════════════════════════
+
+    /**
+     * @notice Envía un ❤️ a otro usuario
+     * @dev Si ambos se dieron like → MATCH automático
+     */
+    function sendHeart(address to)
+        external
+        profileExists(msg.sender)
+        profileExists(to)
+    {
+        require(msg.sender != to, "No puedes darte like a ti mismo");
+        require(!likes[msg.sender][to], "Ya le diste like");
+
+        // Registrar like
+        likes[msg.sender][to] = true;
+        profiles[msg.sender].heartsSent++;
+        profiles[to].heartsReceived++;
+
+        // Mintear 1 $HEART al que da el like
+        heartToken.mintReward(msg.sender, heartToken.REWARD_HEART_SENT(), "heart_sent");
+
+        emit HeartSent(msg.sender, to);
+
+        // ¿Es MATCH mutuo?
+        if (likes[to][msg.sender]) {
+            _createMatch(msg.sender, to);
+        }
+    }
+
+    /**
+     * @dev Crea el match y mintea recompensas a ambos
+     */
+    function _createMatch(address user1, address user2) internal {
+        bytes32 matchId = keccak256(abi.encodePacked(
+            user1 < user2 ? user1 : user2,
+            user1 < user2 ? user2 : user1,
+            block.timestamp
+        ));
+
+        matches[matchId] = Match({
+            user1: user1,
+            user2: user2,
+            matchedAt: block.timestamp,
+            isActive: true
+        });
+
+        userMatches[user1].push(matchId);
+        userMatches[user2].push(matchId);
+
+        profiles[user1].matchCount++;
+        profiles[user2].matchCount++;
+
+        // Mintear 10 $HEART a cada uno por el match
+        heartToken.mintReward(user1, heartToken.REWARD_MATCH(), "match_reward");
+        heartToken.mintReward(user2, heartToken.REWARD_MATCH(), "match_reward");
+
+        emit MatchCreated(user1, user2, matchId);
+    }
+
+    // ═══════════════════════════════════════════
+    //  BOOST DE PERFIL (con $HEART)
+    // ═══════════════════════════════════════════
+
+    /**
+     * @notice Activa boost de visibilidad quemando $HEART
+     * @dev Requiere approve previo del token
+     */
+    function activateBoost() external profileExists(msg.sender) {
+        require(
+            heartToken.transferFrom(msg.sender, address(this), boostCost),
+            "Transfer de HEART fallido — necesitas approve"
+        );
+
+        uint256 expiry = block.timestamp + boostDuration;
+        profiles[msg.sender].boostExpiry = expiry;
+
+        emit BoostActivated(msg.sender, expiry);
+    }
+
+    /**
+     * @notice Verifica si un perfil tiene boost activo
+     */
+    function isBoosted(address user) external view returns (bool) {
+        return profiles[user].boostExpiry > block.timestamp;
+    }
+
+    // ═══════════════════════════════════════════
+    //  QUERIES / GETTERS
+    // ═══════════════════════════════════════════
+
+    /**
+     * @notice Devuelve el perfil completo de un usuario
+     */
+    function getProfile(address user) external view returns (Profile memory) {
+        return profiles[user];
+    }
+
+    /**
+     * @notice Devuelve los IDs de matches de un usuario
+     */
+    function getMatches(address user) external view returns (bytes32[] memory) {
+        return userMatches[user];
+    }
+
+    /**
+     * @notice Devuelve un match específico
+     */
+    function getMatch(bytes32 matchId) external view returns (Match memory) {
+        return matches[matchId];
+    }
+
+    /**
+     * @notice Devuelve todos los perfiles registrados (para el feed)
+     * @dev En producción usar paginación
+     */
+    function getAllProfiles() external view returns (address[] memory) {
+        return allProfiles;
+    }
+
+    /**
+     * @notice Total de usuarios registrados
+     */
+    function totalUsers() external view returns (uint256) {
+        return allProfiles.length;
+    }
+
+    // ═══════════════════════════════════════════
+    //  ADMIN
+    // ═══════════════════════════════════════════
+
+    function setBoostCost(uint256 newCost) external onlyOwner {
+        boostCost = newCost;
+    }
+
+    function setBoostDuration(uint256 newDuration) external onlyOwner {
+        boostDuration = newDuration;
+    }
+
+    /**
+     * @notice Retira $HEART acumulados de boosts
+     */
+    function withdrawHearts() external onlyOwner {
+        uint256 bal = heartToken.balanceOf(address(this));
+        heartToken.transfer(owner, bal);
+    }
+}
